@@ -1,0 +1,86 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+write_files:
+  # Set Docker log limits in daemon.json
+  - path: /etc/docker/daemon.json
+    permissions: '0644'
+    owner: root:root
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": {
+          "max-size": "100m",
+          "max-file": "50"
+        }
+      }
+
+  # Create .bash_aliases for the root user
+  - path: /root/.bash_aliases
+    permissions: '0644'
+    owner: root:root
+    content: |
+      alias docker-compose="docker compose"
+      alias d=docker
+      alias dc="docker compose"
+      alias watch="watch"
+      alias w="watch -n 0.3"
+
+packages:
+  - ca-certificates
+  - curl
+  - htop
+  - pg-activity
+  - tree
+
+runcmd:
+  # Set timezone to Prague
+  - timedatectl set-timezone Europe/Prague
+
+  # Install AzCopy
+  - wget -O azcopy.tar.gz https://aka.ms/downloadazcopy-v10-linux
+  - tar -xvf azcopy.tar.gz --strip-components=1 -C /usr/local/bin
+  - chmod +x /usr/local/bin/azcopy
+
+  # Install Azure CLI
+  - curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
+  # Add PostgreSQL repository
+  - echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | tee /etc/apt/sources.list.d/pgdg.list
+  - wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | apt-key add -
+  - apt-get update
+
+  # Install PostgreSQL client
+  - DEBIAN_FRONTEND=noninteractive apt-get install --yes postgresql postgresql-client postgresql-client-common postgresql-contrib
+
+  # Stop and disable PostgreSQL service
+  - systemctl stop postgresql
+  - systemctl disable postgresql
+
+  # Dump installed packages versions
+  - az --version > /tmp/installed-versions.txt
+  - azcopy --version >> /tmp/installed-versions.txt
+
+  - pg_dump --version >> /tmp/installed-versions.txt
+  - pg_restore --version >> /tmp/installed-versions.txt
+  - pgbench --version >> /tmp/installed-versions.txt
+  - psql --version >> /tmp/installed-versions.txt
+
+  # Uninstall old Docker versions
+  - for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do sudo apt-get remove $pkg; done
+
+  # Install Docker
+  - curl -fsSL https://get.docker.com -o get-docker.sh
+  - sudo sh get-docker.sh
+
+  # Enable and start Docker services
+  - systemctl enable docker.service
+  - systemctl enable containerd.service
+  - systemctl start docker.service
+
+  # Restart Docker service to apply log limits
+  - systemctl restart docker.service
+
+  # Run pgwatch demo
+  - docker run --detach --name pw3 -p 5432:5432 -p 3000:3000 -p 8080:8080 -e PW_TESTDB=true cybertecpostgresql/pgwatch-demo
